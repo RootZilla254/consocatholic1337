@@ -5,9 +5,14 @@ import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
 import Select from '../../../components/ui/Select';
 import { apiService } from '../../../services/api';
+import { useErrorHandler } from '../../../hooks/useErrorHandler';
+import { useToast } from '../../../hooks/useToast';
+import ErrorHandler from '../../../services/errorHandler';
 
 const AuthenticationCard = ({ onBiometricLogin, selectedRole, onRoleChange }) => {
   const navigate = useNavigate();
+  const { executeWithErrorHandling } = useErrorHandler();
+  const { success, error: showError } = useToast();
   const [authMode, setAuthMode] = useState('signin'); // 'signin', 'signup', 'register'
   const [credentials, setCredentials] = useState({
     username: '',
@@ -48,30 +53,38 @@ const AuthenticationCard = ({ onBiometricLogin, selectedRole, onRoleChange }) =>
   };
 
   const validateForm = () => {
-    const newErrors = {};
-    if (!selectedRole) newErrors.role = 'Please select your role';
-    if (!credentials.username) newErrors.username = 'Username is required';
-    if (!credentials.password) newErrors.password = 'Password is required';
+    const validationRules = {
+      role: { required: true, message: 'Please select your role' },
+      username: { required: true, type: 'email', message: 'Valid email is required' },
+      password: { required: true, minLength: 6 }
+    };
 
     if (authMode === 'signup' || authMode === 'register') {
-      if (!credentials.fullName) newErrors.fullName = 'Full name is required';
-      if (!credentials.confirmPassword) newErrors.confirmPassword = 'Please confirm your password';
-      if (credentials.password !== credentials.confirmPassword) {
-        newErrors.confirmPassword = 'Passwords do not match';
-      }
-      if (credentials.password.length < 6) {
-        newErrors.password = 'Password must be at least 6 characters';
-      }
+      validationRules.fullName = { required: true };
+      validationRules.confirmPassword = { 
+        required: true,
+        validate: (value, formData) => {
+          if (value !== formData.password) {
+            return 'Passwords do not match';
+          }
+          return null;
+        }
+      };
+      
       if (selectedRole === 'Teacher' || selectedRole === 'Admin') {
-        if (!credentials.employeeId) newErrors.employeeId = 'Employee ID is required';
+        validationRules.employeeId = { required: true };
       }
-      if (selectedRole === 'Parent' && !credentials.phone) {
-        newErrors.phone = 'Phone number is required';
+      
+      if (selectedRole === 'Parent') {
+        validationRules.phone = { required: true, type: 'phone' };
       }
     }
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const formData = { ...credentials, role: selectedRole };
+    const validationErrors = ErrorHandler.handleFormValidation(formData, validationRules);
+    
+    setErrors(validationErrors);
+    return Object.keys(validationErrors).length === 0;
   };
 
   const handleSubmit = async () => {
@@ -84,74 +97,35 @@ const AuthenticationCard = ({ onBiometricLogin, selectedRole, onRoleChange }) =>
     }
 
     setIsLoading(true);
-    //await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Simulating API call
-    // await new Promise(resolve => setTimeout(resolve, 1500));
-
-    // Mock successful login
-    // navigate('/student-dashboard');
-    try {
-      const response = await apiService.login(credentials.username, credentials.password);
-
-      // Navigate based on user role
-      const userRole = response.user.role.toLowerCase();
-      const dashboardRoutes = {
-        Admin: '/admin-dashboard',
-        Teacher: '/teacher-dashboard',
-        Parent: '/parent-dashboard',
-        Student: '/student-dashboard'
-      };
-
-      navigate(dashboardRoutes[selectedRole]);
-      // Show success message
-      console.log('Login successful:', response.user.fullName);
-
-    } catch (error) {
-      console.error('Login failed:', error);
-      // You can add toast notification here
-      alert('Login failed: ' + error.message);
-    } finally {
-      setIsLoading(false);
-    }
-
-    /* if (authMode === 'signin') {
-      const roleCredentials = mockCredentials[selectedRole];
-      if (
-        credentials.username === roleCredentials.username &&
-        credentials.password === roleCredentials.password
-      ) {
+    await executeWithErrorHandling(async () => {
+      if (authMode === 'signin') {
+        const response = await apiService.login(credentials.username, credentials.password);
+        
         const dashboardRoutes = {
           Admin: '/admin-dashboard',
           Teacher: '/teacher-dashboard',
           Parent: '/parent-dashboard',
           Student: '/student-dashboard'
         };
-        navigate(dashboardRoutes[selectedRole]);
+
+        success(`Welcome back, ${response.user.full_name}!`);
+        navigate(dashboardRoutes[response.user.role] || dashboardRoutes[selectedRole]);
       } else {
-        setErrors({
-          credentials: `Invalid credentials. Use ${roleCredentials.username} / ${roleCredentials.password}`
-        });
-      }
-    } else {
-      // Registration successful
-      setErrors({
-        success: `Registration successful! You can now sign in with your credentials.`
-      });
-      setTimeout(() => {
+        // Handle registration
+        const registrationData = {
+          email: credentials.username,
+          password: credentials.password,
+          full_name: credentials.fullName,
+          role: selectedRole,
+          phone: credentials.phone,
+          employee_id: credentials.employeeId
+        };
+        
+        await apiService.register(registrationData);
+        success('Registration successful! Please check your email for verification.');
         setAuthMode('signin');
-        setCredentials({
-          username: credentials.username,
-          password: '',
-          confirmPassword: '',
-          fullName: '',
-          phone: '',
-          employeeId: ''
-        });
-        setErrors({});
-      }, 2000);
-    } */
-    setIsLoading(false);
+      }
+    }, { action: 'authentication', mode: authMode, role: selectedRole });
   };
 
   const handleGoogleSignIn = async () => {

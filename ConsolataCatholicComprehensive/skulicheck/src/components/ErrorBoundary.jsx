@@ -1,24 +1,69 @@
 import React from "react";
 import Icon from "./AppIcon";
+import Button from "./ui/Button";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { 
+      hasError: false, 
+      error: null, 
+      errorInfo: null,
+      retryCount: 0 
+    };
   }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true };
+    return { hasError: true, error };
   }
 
   componentDidCatch(error, errorInfo) {
+    this.setState({
+      error,
+      errorInfo
+    });
+    
     error.__ErrorBoundary = true;
     window.__COMPONENT_ERROR__?.(error, errorInfo);
-    // console.log("Error caught by ErrorBoundary:", error, errorInfo);
+    
+    // Log error for debugging
+    console.error("Error caught by ErrorBoundary:", error, errorInfo);
+    
+    // Report error to monitoring service in production
+    if (process.env.NODE_ENV === 'production') {
+      // You can integrate with error reporting services like Sentry here
+      console.error('Production error:', { error, errorInfo });
+    }
+  }
+
+  handleRetry = () => {
+    this.setState(prevState => ({
+      hasError: false,
+      error: null,
+      errorInfo: null,
+      retryCount: prevState.retryCount + 1
+    }));
+  }
+
+  handleReportError = () => {
+    const errorReport = {
+      error: this.state.error?.message,
+      stack: this.state.error?.stack,
+      componentStack: this.state.errorInfo?.componentStack,
+      timestamp: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      url: window.location.href
+    };
+    
+    // Copy error report to clipboard
+    navigator.clipboard.writeText(JSON.stringify(errorReport, null, 2));
+    alert('Error report copied to clipboard. Please share this with support.');
   }
 
   render() {
     if (this.state.hasError) {
+      const isDevelopment = process.env.NODE_ENV === 'development';
+      
       return (
         <div className="min-h-screen flex items-center justify-center bg-neutral-50">
           <div className="text-center p-8 max-w-md">
@@ -39,11 +84,48 @@ class ErrorBoundary extends React.Component {
                 onClick={() => {
                   window.location.href = "/";
                 }}
-                className="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded flex items-center gap-2 transition-colors duration-200 shadow-sm"
+            
+            {/* Error Details for Development */}
+            {isDevelopment && this.state.error && (
+              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-left">
+                <h3 className="text-sm font-semibold text-red-800 mb-2">Error Details (Development Mode)</h3>
+                <pre className="text-xs text-red-700 overflow-auto max-h-32">
+                  {this.state.error.stack}
+              <div className="flex space-x-3">
+                <Button
+                  variant="outline"
+                  onClick={this.handleRetry}
+                  iconName="RotateCcw"
+                  iconPosition="left"
+                  iconSize={18}
+                >
+                  Try Again
+                </Button>
+                <Button
+                  variant="default"
+                  onClick={() => window.location.href = "/"}
+                  iconName="ArrowLeft"
+                  iconPosition="left"
+                  iconSize={18}
+                >
+                  Go Home
+                </Button>
+              </div>
+            </div>
+            
+            {/* Report Error Button */}
+            <div className="mt-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={this.handleReportError}
+                iconName="Bug"
+                iconPosition="left"
+                iconSize={16}
+                className="text-xs"
               >
-                <Icon name="ArrowLeft" size={18} color="#fff" />
-                Back
-              </button>
+                Report Error
+              </Button>
             </div>
           </div >
         </div >
